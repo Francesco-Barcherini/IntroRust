@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex, LockResult};
 use std::time::SystemTime;
 
 struct Game {
-    spoints: u32,
-    cpoints: u32,
-    winpoints: u32,
+    spoints: u32, // punti server
+    cpoints: u32, // punti client
+    winpoints: u32, // punti per vincere
 }
 
 struct Account {
@@ -19,8 +19,8 @@ struct Account {
 }
 
 fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
-    let mut buffer = [0; 1024];
-    let mut id = 0;
+    let mut buffer = [0; 1024]; // buffer per la ricezione dei bytes via tcp
+    let mut id = 0; // id dell'account
     let mut id_opt = None;
     let mut res;
 
@@ -30,8 +30,9 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
     loop {
         match stream.read(&mut buffer) {
             Ok(n) => {
-                // nel caso di connessione chiusa
                 println!("id: {}", id);
+
+                // nel caso di connessione chiusa
                 if n == 0 {
                     println!("client disconnected");
 
@@ -41,6 +42,7 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                         break;
                     }
 
+                    // lock sul vettore di account
                     let lock_result = accounts.lock();
                     match lock_result {
                         LockResult::Ok(mut vector) => {
@@ -56,11 +58,11 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                     break;
                 }
 
-                let msg = String::from_utf8_lossy(&buffer[..n]);
+                let msg = String::from_utf8_lossy(&buffer[..n]); // conversione dei bytes in stringa
                 println!("received: {}", msg);
                 let mut msg = msg.split_whitespace();
                 match msg.next() {
-                    Some("login") => {  
+                    Some("login") => {  // login <username> <password>
                         let username;
                         match msg.next() {
                             Some(value) => username = value,
@@ -91,9 +93,9 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                             LockResult::Ok(mut vector) => {
                                 for (i, account) in vector.iter().enumerate() {
                                     if account.username == username {
-                                        if account.password == password {
+                                        if account.password == password { // accesso effettuato
                                             id_opt = Some(i);
-                                        } else {
+                                        } else { // password sbagliata
                                             wrong_password = true;
                                             res = stream.write(b"error: wrong password\n");
                                             if let Err(e) = res {
@@ -128,7 +130,7 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                                         }
                                         println!("{} logged in", vector[id].username);
                                     },
-                                    None => {
+                                    None => { // account non esistente -> creazione
                                         let new_account = Account {
                                             username: username.to_string(),
                                             password: password.to_string(),
@@ -159,7 +161,7 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
 
                         
                     }
-                    Some("logout") => {
+                    Some("logout") => { // logout -> interrompe la connessione
                         let lock_result = accounts.lock();
                         match lock_result {
                             LockResult::Ok(mut vector) => {
@@ -178,7 +180,7 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                         }
                         break;
                     }
-                    Some("play") => {
+                    Some("play") => { // play <number> -> inizia una partita
                         let n_tcp;
                         match msg.next() {
                             Some(value) => n_tcp = value,
@@ -221,7 +223,7 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                             }
                         }
                     }
-                    Some("choice") => {
+                    Some("choice") => { // choice <r|p|s> -> scelta del giocatore
                         let choice;
                         match msg.next() {
                             Some(value) => choice = value,
@@ -247,7 +249,7 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                                 continue;
                             }
                         };
-                        let server_choice = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() % 3;
+                        let server_choice = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() % 3; // pseudo random
                         let schoice_str = match server_choice {
                             0 => "rock",
                             1 => "paper",
@@ -298,7 +300,7 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
                             }
                         }
                     }
-                    Some("quit") => {
+                    Some("quit") => { // quit -> termina la partita
                         println!("{} quit the game", id);
                         res = stream.write(b"end of game\n");
                         if let Err(e) = res {
@@ -336,7 +338,7 @@ fn main() {
 
     println!("server started");
 
-    let accounts = Arc::new(Mutex::new(Vec::new()));
+    let accounts = Arc::new(Mutex::new(Vec::new())); // vettore di account, condiviso tra i thread
 
     for stream in listener.incoming() {
         match stream {
