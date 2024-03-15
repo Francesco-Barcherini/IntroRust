@@ -22,7 +22,7 @@ Infine il metodo `incoming` crea un iteratore di connessioni che vengono gestite
 Il gioco è implementato utilizzando le seguenti strutture dati:
 * Game: una struttura per tenere traccia dei punteggi di una partita.
 * Account: una struttura che rappresenta un account utente, contenente nome utente, password, stato di login e informazioni sulla partita in corso.
-* Vec<Account>: il vettore di account `accounts`, condiviso tra i thread e protetto da un meccanismo di locking.
+* Vec\<Account\>: il vettore di account `accounts`, condiviso tra i thread e protetto da un meccanismo di locking.
 
 In loop il thread riceve i comandi con il metodo `read` di `TcpStream` e li processa. Al login il thread salva l'id (cioè l'indice nel vettore) dell'account connesso e lo utilizza per accedere ai dati dell'account. Il thread gestisce anche la partita, ricevendo le mosse del client e calcolando il risultato, aggiornando i punteggi e inviando i risultati al client. 
 
