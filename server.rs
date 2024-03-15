@@ -1,32 +1,8 @@
-/*
-Code a client-server application in Rust using the TCP protocol defined in std::net.
-The server listens for incoming connections on 127.0.0.1. The server should be able to handle multiple clients at the same time using threads.
-
-The server should be able to handle the following commands for accounts handling:
-login <username> <password> - logs in the user with the given username and password
-    if account with same username does not exists, signup the user
-logout - logs out the user, end of game and disconnects the client
-play <n>
-    the game is a simple rock-paper-scissors game where the server generates a random choice and the client sends his choice. 
-    The first with n points wins.
-choice <r|p|s>
-    the server receives r, p or s and compares it with the server's choice. The server sends the result and points to the client.
-quit 
-    end of game
-
-Game is a struct with points of server, points of client, points to win, choice of server
-Account is a struct with username, password, logged, next (for the linked list of accounts)
-
-Avoid the use of unwrap. Use instead match, if let or ?.
-*/
-
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
 use std::process::exit;
 use std::thread::spawn;
 use std::sync::{Arc, Mutex, LockResult};
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::time::SystemTime;
 
 struct Game {
@@ -40,174 +16,165 @@ struct Account {
     password: String,
     logged: bool,
     game: Game,
-    next: Option<Rc<Refcell<Account>>>,
 }
 
-struct LinkedList {
-    head: Option<Rc<Refcell<Account>>>,
-}
-
-impl LinkedList {
-    fn new() -> LinkedList {
-        LinkedList {
-            head: None,
-        }
-    }
-
-    fn insert(&mut self, account: Account) {
-        let mut new_node = Rc::new(RefCell::new(account));
-        if let Some(&mut head) = self.head {
-            new_node.next = Some(Rc::clone(head));
-        }
-        self.head = Some(new_node);
-    }
-
-    /* return a mutable pointer to account with that username */
-    fn fin
-
-    fn find(&self, username: &str) -> Option<&Account> {
-        let mut current = &self.head;
-        while let Some(node) = current {
-            if node.username == username {
-                return Some(node);
-            }
-            current = &node.next;
-        }
-        None
-    }
-}
-
-
-fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<LinkedList>>) {
+fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<Vec<Account>>>) {
     let mut buffer = [0; 1024];
-    let mut account: &mut Account;
-    let mut account_opt = None;
+    let mut id = 0;
+    let mut id_opt = None;
     let mut res;
+
+    println!("new client connected");
 
     // ricezione comando
     loop {
         match stream.read(&mut buffer) {
             Ok(n) => {
+                // nel caso di connessione chiusa
+                println!("id: {}", id);
+                if n == 0 {
+                    println!("client disconnected");
+
+                    // se loggato logout
+                    // check che id sia valido
+                    if id_opt.is_none() {
+                        break;
+                    }
+
+                    let lock_result = accounts.lock();
+                    match lock_result {
+                        LockResult::Ok(mut vector) => {
+                            if vector[id].logged {
+                                vector[id].logged = false;
+                                println!("{} logged out", vector[id].username);
+                            }
+                        }
+                        LockResult::Err(_) => {
+                            println!("error: failed to lock accounts");
+                        }
+                    }
+                    break;
+                }
+
                 let msg = String::from_utf8_lossy(&buffer[..n]);
+                println!("received: {}", msg);
                 let mut msg = msg.split_whitespace();
                 match msg.next() {
                     Some("login") => {  
-                        let mut username = "";
+                        let username;
                         match msg.next() {
                             Some(value) => username = value,
                             None => {
                                 res = stream.write(b"error: username not provided\n");
                                 if let Err(e) = res {
                                     println!("failed: {}", e);
-                                    continue;
                                 }
+                                continue;
                             }
                         }               
                         
-                        let mut password = "";
+                        let password;
                         match msg.next() {
                             Some(value) => password = value,
                             None => {
                                 res = stream.write(b"error: password not provided\n");
                                 if let Err(e) = res {
                                     println!("failed: {}", e);
-                                    continue;
                                 }
-                            }
-                        }
-
-                        
-                        let lock_result = accounts.lock();
-                        match lock_result {
-                            LockResult::Ok(value) => {
-                                account_opt = value.find(username);
-                            }
-                            LockResult::Err(_) => {
-                                res = stream.write(b"error: failed to lock accounts\n");
-                                if let Err(e) = res {
-                                    println!("failed: {}", e);
-                                    continue;
-                                }
-                            }
-                        }
-
-                        match account_opt {
-                            Some(value) => {
-                                account = value;
-                                if account.password == password {
-                                    // se online errore
-                                    if account.logged {
-                                        res = stream.write(b"error: account already logged in\n");
-                                        if let Err(e) = res {
-                                            println!("failed: {}", e);
-                                            continue;
-                                        }
-                                    }
-    
-                                    account.logged = true;
-                                    res = stream.write(b"logged in\n");
-                                    if let Err(e) = res {
-                                        println!("failed: {}", e);
-                                        continue;
-                                    }
-                                } else {
-                                    res = stream.write(b"error: wrong password\n");
-                                    if let Err(e) = res {
-                                        println!("failed: {}", e);
-                                        continue;
-                                    }
-                                }
-                            },
-                            None => {
-                                let new_account = Account {
-                                    username: username.to_string(),
-                                    password: password.to_string(),
-                                    logged: true,
-                                    game: Game {
-                                        spoints: 0,
-                                        cpoints: 0,
-                                        winpoints: 3,
-                                    },
-                                    next: None,
-                                };
-    
-                                let lock_result = accounts.lock();
-                                match lock_result {
-                                    LockResult::Ok(value) => {
-                                        value.insert(new_account);
-                                    }
-                                    LockResult::Err(_) => {
-                                        res = stream.write(b"error: failed to lock accounts\n");
-                                        if let Err(e) = res {
-                                            println!("failed: {}", e);
-                                            continue;
-                                        }
-                                    }
-                                }
-                                
-                                res = stream.write(b"account created and logged in\n");
-                                if let Err(e) = res {
-                                    println!("failed: {}", e);
-                                    continue;
-                                }                           
-                            },
-                        }
-                    }
-                    Some("logout") => {
-                        if account_opt.is_none() || account.logged == false {
-                            res = stream.write(b"error: account not logged in\n");
-                            if let Err(e) = res {
-                                println!("failed: {}", e);
                                 continue;
                             }
                         }
 
-                        // closes connection and thread
-                        account.logged = false;
-                        res = stream.write(b"logged out\n");
-                        if let Err(e) = res {
-                            println!("failed: {}", e);
-                            continue;
+                        let mut wrong_password = false;
+                        let lock_result = accounts.lock();
+                        match lock_result {
+                            LockResult::Ok(mut vector) => {
+                                for (i, account) in vector.iter().enumerate() {
+                                    if account.username == username {
+                                        if account.password == password {
+                                            id_opt = Some(i);
+                                        } else {
+                                            wrong_password = true;
+                                            res = stream.write(b"error: wrong password\n");
+                                            if let Err(e) = res {
+                                                println!("failed: {}", e);
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+
+                                if wrong_password {
+                                    continue;
+                                }
+
+                                match id_opt {
+                                    Some(value) => {
+                                        id = value;
+                                        // se online errore
+                                        if vector[id].logged {
+                                            res = stream.write(b"error: account already logged in\n");
+                                            if let Err(e) = res {
+                                                println!("failed: {}", e);
+                                            }
+                                            continue;
+                                        }
+        
+                                        vector[id].logged = true;
+                                        res = stream.write(b"logged in\n");
+                                        if let Err(e) = res {
+                                            println!("failed: {}", e);
+                                            continue;
+                                        }
+                                        println!("{} logged in", vector[id].username);
+                                    },
+                                    None => {
+                                        let new_account = Account {
+                                            username: username.to_string(),
+                                            password: password.to_string(),
+                                            logged: true,
+                                            game: Game {
+                                                spoints: 0,
+                                                cpoints: 0,
+                                                winpoints: 3,
+                                            },
+                                        };
+                                        vector.push(new_account);
+                                        id = vector.len() - 1;
+                                        id_opt = Some(id);
+                                        println!("{} created", username);
+                                        res = stream.write(b"account created and logged in\n");
+                                        if let Err(e) = res {
+                                            println!("failed: {}", e);
+                                            continue;
+                                        }                           
+                                    },
+                                }
+                            }
+                            LockResult::Err(_) => {
+                                let _ = stream.write(b"error: failed to lock accounts\n");
+                                panic!("failed to lock accounts");
+                            }
+                        }
+
+                        
+                    }
+                    Some("logout") => {
+                        let lock_result = accounts.lock();
+                        match lock_result {
+                            LockResult::Ok(mut vector) => {
+                                vector[id].logged = false;
+                                println!("{} logged out", vector[id].username);
+                                res = stream.write(b"logged out\n");
+                                if let Err(e) = res {
+                                    println!("failed: {}", e);
+                                    continue;
+                                }
+                            }
+                            LockResult::Err(_) => {
+                                let _ = stream.write(b"error: failed to lock accounts\n");
+                                panic!("failed to lock accounts");
+                            }
                         }
                         break;
                     }
@@ -219,28 +186,39 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<LinkedList>>) {
                                 res = stream.write(b"error: number of points not provided\n");
                                 if let Err(e) = res {
                                     println!("failed: {}", e);
-                                    continue;
                                 }
+                                continue;
                             }
                         };
-                        let n: u32;
+                        let n;
                         match n_tcp.parse::<u32>() {
                             Ok(value) => n = value,
                             Err(_) => {
                                 res = stream.write(b"error: invalid number of points\n");
                                 if let Err(e) = res {
                                     println!("failed: {}", e);
+                                }
+                                continue;
+                            }
+                        };
+
+                        let lock_result = accounts.lock();
+                        match lock_result {
+                            LockResult::Ok(mut vector) => {
+                                vector[id].game.winpoints = n;
+                                vector[id].game.spoints = 0;
+                                vector[id].game.cpoints = 0;
+                                println!("{} started a game with {} points", vector[id].username, n);
+                                res = stream.write(b"game started\n");
+                                if let Err(e) = res {
+                                    println!("failed: {}", e);
                                     continue;
                                 }
                             }
-                        };
-                        account.game.winpoints = n;
-                        account.game.spoints = 0;
-                        account.game.cpoints = 0;
-                        res = stream.write(b"game started\n");
-                        if let Err(e) = res {
-                            println!("failed: {}", e);
-                            continue;
+                            LockResult::Err(_) => {
+                                let _ = stream.write(b"error: failed to lock accounts\n");
+                                panic!("failed to lock accounts");
+                            }
                         }
                     }
                     Some("choice") => {
@@ -251,8 +229,8 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<LinkedList>>) {
                                 res = stream.write(b"error: choice not provided\n");
                                 if let Err(e) = res {
                                     println!("failed: {}", e);
-                                    continue;
                                 }
+                                continue;
                             }
                         };
 
@@ -265,68 +243,63 @@ fn handle_client(mut stream: TcpStream, accounts: Arc<Mutex<LinkedList>>) {
                                 res = stream.write(b"error: invalid choice\n");
                                 if let Err(e) = res {
                                     println!("failed: {}", e);
-                                    continue;
                                 }
+                                continue;
                             }
                         };
                         let server_choice = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() % 3;
-                        let result = (numchoice - server_choice + 3) % 3;
-                        match result {
-                            0 => {
-                                res = stream.write(b"tie\n");
+                        let schoice_str = match server_choice {
+                            0 => "rock",
+                            1 => "paper",
+                            2 => "scissors",
+                            _ => "error: invalid server choice",
+                        };
+                        let result = (numchoice + 3 - server_choice) % 3;
+
+                        let lock_result = accounts.lock();
+                        match lock_result {
+                            LockResult::Ok(mut vector) => {
+                                let msg;
+                                let account = &mut vector[id];
+                                match result {
+                                    0 => {
+                                        msg = "tie\n";
+                                    }
+                                    1 => {
+                                        account.game.cpoints += 1;
+                                        msg = "you win\n";
+                                    }
+                                    2 => {
+                                        account.game.spoints += 1;
+                                        msg = "you lose\n";
+                                    }
+                                    _ => {
+                                        msg = "error: invalid result\n";
+                                    }
+                                }
+
+                                let msg_state = 
+                                    if account.game.spoints == account.game.winpoints 
+                                        {format!("{} - {} => you lose the game\n", account.game.cpoints, account.game.spoints)}
+                                    else if account.game.cpoints == account.game.winpoints
+                                        {format!("{} - {} => you win the game\n", account.game.cpoints, account.game.spoints)}
+                                    else
+                                        {format!("{} - {} ({} to win)\n", account.game.cpoints, account.game.spoints, account.game.winpoints)};
+
+                                let res = stream.write(format!("{}: {}{}", schoice_str, msg, msg_state).as_bytes());
                                 if let Err(e) = res {
                                     println!("failed: {}", e);
                                     continue;
                                 }
                             }
-                            1 => {
-                                account.game.cpoints += 1;
-                                res = stream.write(b"you win\n");
-                                if let Err(e) = res {
-                                    println!("failed: {}", e);
-                                    continue;
-                                }
-                            }
-                            2 => {
-                                account.game.spoints += 1;
-                                res = stream.write(b"you lose\n");
-                                if let Err(e) = res {
-                                    println!("failed: {}", e);
-                                    continue;
-                                }
-                            }
-                            _ => {
-                                res = stream.write(b"error: invalid result\n");
-                                if let Err(e) = res {
-                                    println!("failed: {}", e);
-                                    continue;
-                                }
-                            }
-                        }
-                        if account.game.spoints == account.game.winpoints {
-                            let msg = format!("{} - {} => you lose the game\n", account.game.spoints, account.game.cpoints);
-                            res = stream.write(msg.as_bytes());
-                            if let Err(e) = res {
-                                println!("failed: {}", e);
-                                continue;
-                            }
-                        } else if account.game.cpoints == account.game.winpoints {
-                            let msg = format!("{} - {} => you win the game\n", account.game.spoints, account.game.cpoints);
-                            res = stream.write(msg.as_bytes());
-                            if let Err(e) = res {
-                                println!("failed: {}", e);
-                                continue;
-                            }
-                        } else {
-                            let msg = format!("{} - {} ({} to win)\n", account.game.spoints, account.game.cpoints, account.game.winpoints);
-                            res = stream.write(msg.as_bytes());
-                            if let Err(e) = res {
-                                println!("failed: {}", e);
-                                continue;
+                            LockResult::Err(_) => {
+                                let _ = stream.write(b"error: failed to lock accounts\n");
+                                panic!("failed to lock accounts");
                             }
                         }
                     }
                     Some("quit") => {
+                        println!("{} quit the game", id);
                         res = stream.write(b"end of game\n");
                         if let Err(e) = res {
                             println!("failed: {}", e);
@@ -361,7 +334,9 @@ fn main() {
         }
     }
 
-    let accounts = Arc::new(Mutex::new(LinkedList::new()));
+    println!("server started");
+
+    let accounts = Arc::new(Mutex::new(Vec::new()));
 
     for stream in listener.incoming() {
         match stream {
